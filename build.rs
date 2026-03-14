@@ -1,6 +1,77 @@
-use std::{env, fs::File, io::Read, process::Command};
+use std::{
+    env,
+    fs::File,
+    io::Read,
+    path::Path,
+    process::Command,
+    time::SystemTime,
+};
+
+fn dir_has_newer(dir: &str, than: SystemTime, skip: &[&str]) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if skip.contains(&name_str.as_ref()) {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            if dir_has_newer(path.to_str().unwrap(), than, skip) {
+                return true;
+            }
+        } else if let Ok(meta) = entry.metadata() {
+            if let Ok(modified) = meta.modified() {
+                if modified > than {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn build_ui() {
+    // Tell Cargo to re-run this script when UI sources change
+    println!("cargo:rerun-if-changed=src/celemod-ui");
+    println!("cargo:rerun-if-changed=resources/dist.rc");
+
+    let dist_rc = Path::new("resources/dist.rc");
+
+    let needs_build = if !dist_rc.exists() {
+        println!("cargo:warning=resources/dist.rc not found, building UI...");
+        true
+    } else {
+        let dist_time = dist_rc.metadata().unwrap().modified().unwrap();
+        let stale = dir_has_newer("src/celemod-ui", dist_time, &["node_modules", "dist"]);
+        if stale {
+            println!("cargo:warning=UI sources newer than dist.rc, rebuilding UI...");
+        }
+        stale
+    };
+
+    if needs_build {
+        let status = if cfg!(windows) {
+            Command::new("cmd")
+                .args(["/C", "yarn", "build"])
+                .current_dir("src/celemod-ui")
+                .status()
+        } else {
+            Command::new("yarn")
+                .arg("build")
+                .current_dir("src/celemod-ui")
+                .status()
+        };
+        let status = status.expect("failed to spawn `yarn build`");
+        assert!(status.success(), "`yarn build` exited with non-zero status");
+    }
+}
 
 fn main() {
+    build_ui();
+
     let output = Command::new("git")
         .args(["rev-parse", "HEAD"])
         .output()
