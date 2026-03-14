@@ -13,6 +13,11 @@ export const useEnableAcrylic = create<{
 }));
 
 export const createThemeContext = () => {
+  const getScale = () =>
+    window.devicePixelRatio && window.devicePixelRatio > 0
+      ? window.devicePixelRatio
+      : 1;
+
   const { storage, save } = useStorage();
   const { enableAcrylic, setEnableAcrylic } = useEnableAcrylic();
 
@@ -23,17 +28,28 @@ export const createThemeContext = () => {
     storage.root.windowSize ??= [800, 600];
 
     setEnableAcrylic(storage.root.enableAcrylic);
+    const scale = getScale();
+    const toPhysical = (value: number) => Math.round(value * scale);
     // @ts-ignore
     const [x, y, w, h] = Window.this.box("xywh", "border", "desktop");
-    if (storage.root.windowSize[0] !== w || storage.root.windowSize[1] !== h) {
+    if (
+      storage.root.windowSize[0] !== w ||
+      storage.root.windowSize[1] !== h
+    ) {
       console.log("persist size", storage.root.windowSize);
       if (storage.root.windowSize.length === 4) {
-        const [w, h, x, y] = storage.root.windowSize;
+        const [savedW, savedH, savedX, savedY] = storage.root.windowSize;
         // @ts-ignore
-        Window.this.move(x, y, w, h);
+        Window.this.move(
+          toPhysical(savedX),
+          toPhysical(savedY),
+          toPhysical(savedW),
+          toPhysical(savedH),
+        );
       } else {
+        const [savedW, savedH] = storage.root.windowSize;
         // @ts-ignore
-        Window.this.move(x, y, ...storage.root.windowSize);
+        Window.this.move(x, y, toPhysical(savedW), toPhysical(savedH));
       }
     }
   }, [storage]);
@@ -56,6 +72,7 @@ export const createThemeContext = () => {
   }, [enableAcrylic, storage]);
 
   useEffect(() => {
+    if (!storage) return;
     let lastResize = -1;
     const handler = () => {
       const now = Date.now();

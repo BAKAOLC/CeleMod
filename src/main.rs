@@ -1159,10 +1159,16 @@ fn main() {
     // windows only
     #[cfg(windows)]
     {
-        use winapi::um::winuser::SetProcessDPIAware;
-        use winapi::um::winuser::ShowWindow;
+        use winapi::shared::windef::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2;
+        use winapi::um::winuser::{
+            SetProcessDPIAware,
+            SetProcessDpiAwarenessContext,
+            ShowWindow,
+        };
         unsafe {
-            SetProcessDPIAware();
+            if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) == 0 {
+                SetProcessDPIAware();
+            }
             #[cfg(debug_assertions)]
             {
                 use winapi::um::wincon::{ATTACH_PARENT_PROCESS, AttachConsole};
@@ -1178,14 +1184,18 @@ fn main() {
                 );
             }
         }
-        if !std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("sciter.dll")
-            .exists()
-            && !Path::new("./sciter.dll").exists()
-        {
+        let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let exe_sciter = exe_dir.join("sciter.dll");
+        if !exe_sciter.exists() {
+            let bundled_sciter = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("resources")
+                .join("sciter.dll");
+            if bundled_sciter.exists() {
+                let _ = std::fs::copy(&bundled_sciter, &exe_sciter);
+            }
+        }
+
+        if !exe_sciter.exists() && !Path::new("./sciter.dll").exists() {
             let _ = msgbox::create(
                 "sciter.dll not found\nPlease extract all the files in the zip into a folder.\nIf you are using CI builds, obtain dependencies from the latest release build first.",
                 "Dependency Missing",
@@ -1204,7 +1214,7 @@ fn main() {
     // #[cfg(target_os = "macos")]
     // let _ = sciter::set_options(sciter::RuntimeOptions::GfxLayer(GFX_LAYER::SKIA_VULKAN));
 
-    let mut builder = sciter::WindowBuilder::main().with_size((800, 640));
+    let mut builder = sciter::WindowBuilder::main().with_size((800, 600));
 
     #[cfg(not(target_os = "windows"))]
     {
@@ -1241,18 +1251,32 @@ fn main() {
 
 
     #[cfg(debug_assertions)]
-    frame.load_html(
-        read_to_string_bom(Path::new("../../src/celemod-ui/debug_index.html"))
-            .unwrap()
-            .as_bytes(), Some(
-                &format!("app://{}", INDEX_HTML)
-            ));
+    {
+        let use_dev_loader = std::env::var("CELEMOD_UI_DEV")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+        if use_dev_loader {
+            frame.load_html(
+                read_to_string_bom(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src/celemod-ui/debug_index.html"))
+                    .unwrap()
+                    .as_bytes(), Some(
+                        &format!("app://{}", INDEX_HTML)
+                    ));
+        } else {
+            frame
+                .archive_handler(include_bytes!("../resources/dist.rc"))
+                .unwrap();
+
+            frame.load_file(&format!("this://app/{}", INDEX_HTML));
+        }
+    }
     #[cfg(not(debug_assertions))]
     {
         frame
             .archive_handler(include_bytes!("../resources/dist.rc"))
             .unwrap();
-        
+
         frame.load_file(&format!("this://app/{}", INDEX_HTML));
     }
 
